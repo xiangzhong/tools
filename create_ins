@@ -1,0 +1,736 @@
+#!/bin/bash
+# ./create_ins -i /home/xiangzhong.wxd/test/xzh/ -m /usr/local/ -p 4543 -rp 123 -u test1 -up 321 -ud test4 -r 
+
+#usage: create_ins -i instance_dir -m mysql_dir -p db_port -rp root_pass -u mysql_user -up user_pass -ud user_db [-su linux_user] [-b buffer_pool_size] [-I server_id]  [-h hostlist] [-r]
+#argument:
+#option:
+#       -i:specified install directory of mysql instance, with 2 extra argument:
+#           <instance_dir>: dir of instance
+#       -m: install directory of mysql,such as /usr/local
+#       -p: database port
+#       -rp: specified mysql root password
+#       -u:specified mysql user which to connect this db
+#           <mysql_user>: mysql user 
+#       -up:specified password of mysql_user which to connect this db
+#           <user_pass>: mysql_user's password 
+#       -ud:specified database of mysql_user
+#           <user_db>: mysql_user's database
+#       -su:start mysql user name, most time it is "mysql or admin"
+#           <linux_user>: linux user name, used to create or drop db instance,default is current user
+#       -b: buffer pool size, unit is MB, default is 200M
+#       -I: server id of this instance, server-id of my.cnf,default is 4
+#       -h: specified mysql_user can access's hostlist or any,such as "10.232.31.92#10.323.31.89"
+#           <hostlist>: valid access host list of user, any or host ip list separated by '#'
+#           if not specified hostlist == any
+#       -r:print result of this script in human readable format, with 0 extra argument
+
+show_help ()
+{
+    echo "usage: create_ins -i instance_dir -m mysql_dir -p db_port -rp root_pass -u mysql_user -up user_pass -ud user_db"
+}
+
+## for failed clean
+shutdown ()
+{
+    stop_instance="$user_mysqladmin --defaults-file=$defaults -uroot shutdown"
+    mysql_check=$user_mysqladmin" --defaults-file="$defaults" ping"
+    if [ $readable_flag -eq 1 ]
+    then
+        echo "shutdown with command: $stop_instance"
+    fi
+    started=1
+    check_start_count=10
+    while [ $check_start_count -ne 0 -a $started -eq 1 ]
+    do
+        #echo "more"
+        check_start_count=`expr $check_start_count - 1`
+        eval "$mysql_check  &> /dev/null"
+        check_flag=$?
+        if [ $check_flag -eq 0 ]
+        then
+            eval "$stop_instance"
+            sleep 1
+        else
+            started=0
+        fi
+    done
+
+    if [ $started = 1 ]
+    then
+        shutdown_err="fatal error: the mysqld down failed when return no <$return_value>"
+    fi
+}
+
+## 1. create instance dir
+create_db_dir ()
+{
+    for dir in $instance_dir/conf $instance_dir/data $instance_dir/run $instance_dir/log $instance_dir/tmp
+    do
+    #   echo "local dir: $local_dir_create"
+        if [ -e $dir ]
+        then
+            return_value=19
+            error_exit
+        fi
+        mkdir -p $dir
+        is_created_dir=1
+        chmod 755 $dir
+        #################################
+        #                               #
+        # here we change state          #
+        #                               #
+        #################################
+        if test -w $instance_dir -a ! -z "$linux_user"
+        then
+            chown $linux_user $dir &> /dev/null
+            if [ $? -ne 0 ]
+            then
+                return_value=21
+                error_exit
+            fi
+        fi
+    done
+}
+
+gen_config ()
+{
+    sample_db_conf=$script_dir$sample_db_conf                                                                                                                                    
+
+    #check my.cnf source
+    if test ! -f "$sample_db_conf"
+    then
+        return_value=-1
+        error_exit
+    fi
+
+    defaults=$instance_dir"/conf/my.cnf"
+
+    buffer_size="$buffer_size $buffer_pool_size""M"
+
+    #replace dir & port & sid & rol 
+    eval "sed -e 's#$dir_meta#$instance_dir#g' -e 's#$dir_base#$mysql_dir#' -e 's#$port_base#$db_port#' -e 's#$sid_base#$server_id#' -e 's#$rol_base#$rol_off#' -e 's#innodb_buffer_pool_size.*#$buffer_size#g' -e 's#$start_user#user=$linux_user#' $sample_db_conf > $defaults" 
+    
+    if test -w $instance_dir -a ! -z "$linux_user"
+    then
+        chown $linux_user $defaults &> /dev/null
+        if [ $? -ne 0 ]
+        then                                                                                                                                                                 
+            return_value=21
+            error_exit
+        fi
+    fi
+}
+
+install_db ()
+{
+    # initialize this instance use mysql_install_db
+    initialize_db="$user_installdb --defaults-file=$defaults --basedir=$mysql_dir --datadir=$instance_dir/data $user_name_option --force"
+    if [ $readable_flag -eq 1 ]
+    then
+        echo "initialize_db command: $initialize_db"
+    fi
+    install_db_res=$(eval "$initialize_db" 2>&1)
+    instance_initialized_flag=$?
+
+    if [ $instance_initialized_flag != 0 ]
+    then
+        return_value=22
+        error_exit
+    fi
+}
+
+start_server ()
+{
+    # start this mysql instance with mysqld_safe
+    safemysqld="$user_mysqld --defaults-file=$defaults &> /dev/null &"
+    if [ $readable_flag = 1 ]
+    then
+        echo "start mysqld_safe command: $safemysqld"
+    fi
+    export UMASK="0666"
+    export UMASK_DIR="0777"
+    eval "$safemysqld"
+    safemysqld_start_flag=$?
+
+    rename_alert_log=$(date | sed -e 's#[ ]#_#g' -e 's#:#_#g')".alert.log"
+    cp_alert_log="cp $instance_dir/log/alert.log $tmp_alert_dir/$rename_alert_log"
+
+    if [ $safemysqld_start_flag != 0 ]
+    then
+        if [ $readable_flag = 1 ]
+        then
+            echo "cp alert log cmd: $cp_alert_log"
+        fi
+
+        eval "$cp_alert_log"
+
+        return_value=23
+        error_exit
+    fi
+}
+
+check_server ()
+{
+    # check if this instance start correctlly
+    sleep 1
+    check_start_count=10
+    mysql_check=$user_mysqladmin" --defaults-file="$defaults" ping"
+    check_successful=0
+    check_flag=0
+    while [ $check_start_count != 0 -a $check_successful = 0 ]          #use mysqladmin ping 3 times
+    do
+        check_start_count=`expr $check_start_count - 1`
+    #       echo "test limit: $check_start_count"
+        eval "$mysql_check  &> /dev/null"
+        check_flag=$?
+        if [ $check_flag = 0 ]
+        then
+            check_successful=1
+        else
+            sleep 1
+        fi
+    done
+
+    if [ $check_successful = 0 ]
+    then
+        eval "$cp_alert_log"
+        return_value=24
+        error_exit
+    fi
+    eval "$cp_alert_log"
+}
+
+modify_root_pwd ()
+{
+    set_root="$user_mysql --defaults-file=$defaults -uroot -e\"update mysql.user set password=PASSWORD('"$root_pass"') where user='root'; flush privileges;\""
+    if [ $readable_flag = 1 ]
+    then
+        echo "set root command: $set_root"
+    fi
+
+    eval "$set_root"
+    set_root_flag=$?
+
+    if [ $set_root_flag != 0 ]
+    then
+        shutdown
+        return_value=26
+        error_exit
+    fi
+}
+
+create_user_db ()
+{
+    # create database for user
+    create_database="\"create database "$user_db";\""
+    mysql_create_database=$mysql_command$create_database
+    
+    if [ $readable_flag = 1 ]
+        then
+            echo "mysql create database command: $mysql_create_database"
+    fi
+    
+    mysql_create_db_res=$(eval $mysql_create_database 2>&1)
+    mysql_create_db_flag=$?
+    #echo "create db res: $mysql_create_db_flag"
+    if [ $mysql_create_db_flag = 0 ]        #create a database with <user_db> for user
+    then
+        database_create=1
+    else                    
+        return_value=31
+        error_exit
+    fi
+}
+
+create_user_account ()
+{
+    # create user database account for user
+    user_list=$mysql_user"@'localhost', "$mysql_user"@'127.0.0.1'"
+    if [ ${#host_list[*]} -gt 0 ]
+    then
+    #   echo "host_list[${#host_list[*]}]: $host_list"
+        for s in ${host_list[@]}
+        do 
+            user_list=$user_list" ,"$mysql_user"@'"$s"'"
+        done
+    else ##if not specified -h, then go here
+            user_list=$user_list" ,"$mysql_user
+    fi
+    
+    create_user_account="\"create user "$user_list";\""
+    
+    mysql_create_user_account=$mysql_command$create_user_account
+    
+    if [ $readable_flag = 1 ]
+    then
+        echo "mysql create user account command: $mysql_create_user_account"
+    fi
+    
+    mysql_create_uc_res=$(eval $mysql_create_user_account 2>&1) #we get error output of mysql create user account command
+    
+    mysql_create_uc_flag=$?
+    if [ $mysql_create_uc_flag = 0 ]                #create an user account for user <mysql_user>
+    then
+        local_account_create=1
+    else   
+        return_value=32
+        error_exit
+    fi
+}
+
+grant_user ()
+{
+    # grant for user
+    grant_user_account="\"grant all on "$user_db".* to "$mysql_user"@'localhost' identified by '"$user_pass"', "$mysql_user"@'127.0.0.1' identified by '"$user_pass"'"
+    if [ ${#host_list[*]} -gt 0 ]
+    then
+        for s in ${host_list[@]}
+        do
+            grant_user_account=$grant_user_account", "$mysql_user"@'"$s"' identified by '"$user_pass"'"
+        done
+    else
+            grant_user_account=$grant_user_account", "$mysql_user" identified by '"$user_pass"'"
+    fi
+    grant_user_account=$grant_user_account"; flush privileges;\""
+    mysql_grant_user_account=$mysql_command$grant_user_account
+    
+    if [ $readable_flag = 1 ]
+    then
+        echo "mysql grant user account command: $mysql_grant_user_account"
+    fi
+    
+    grant_user_res=$(eval $mysql_grant_user_account 2>&1)
+    mysql_grant_uc_flag=$?
+    if [ $mysql_grant_uc_flag = 0 ]         #grant an user account for user <mysql_user> 
+    then
+        local_account_grant=1
+    else              
+        return_value=33
+        error_exit
+    fi
+}
+
+check_grant ()
+{
+    # quit root account and login mysqld by <user_name user_db_pass>, and test its authority
+    mysql_check_auth=$user_mysql" --defaults-file="$defaults" -u"$mysql_user" -p"$user_pass" -e\"use "$user_db"; create temporary table tblt (name char(20)); drop temporary table tblt;\""
+    
+    if [ $readable_flag = 1 ]
+    then
+        echo "mysql check auth command: $mysql_check_auth"
+    fi
+    
+    check_grant_res=$(eval $mysql_check_auth 2>&1)
+    mysql_check_auth_flag=$?
+    
+    if [ $mysql_check_auth_flag -ne 0 ]
+    then
+        return_value=34
+        error_exit
+    fi
+}
+
+## -1: not sample.my.cnf
+## 0: ok
+## 1-20: user argument error
+## 21-30: install and start error
+## 31-40: auth and grant error 
+## 41-50: create replicate and get binlog info error
+error_exit ()
+{
+    if [ $return_value -ne 0 ]
+    then
+        if [ $local_account_grant -eq 1 ]
+        then
+            revoke_user_account="\"revoke all on "$user_db".* from "$user_list";\""
+            mysql_revoke_user_account=$mysql_command$revoke_user_account
+            eval $mysql_revoke_user_account >/dev/null 2>&1
+        fi
+
+        if [ $local_account_create -eq 1 ]
+        then
+            drop_user_account="\"drop user "$user_list";\""
+            mysql_drop_user_account=$mysql_command$drop_user_account
+            eval $mysql_drop_user_account >/dev/null 2>&1 
+        fi
+
+        if [ $database_create -eq 1 ]
+        then
+            drop_database="\"drop database "$user_db";\""
+            mysql_drop_database=$mysql_command$drop_database
+            eval $mysql_drop_database >/dev/null 2>&1
+        fi
+
+        if [ $is_created_dir -eq 1 ]
+        then
+            rm -rf $instance_dir
+        fi
+
+    fi
+
+    case $return_value in
+    -1)
+        echo "[error] serious error:sample my.cnf [$sample_db_conf] is not exist"
+        ;;
+    0)
+        echo "[ok] add user and grant success"
+        ;;
+    1)
+        echo "[error] user argument error,not enough arguments"
+        ;;
+    2)
+        echo "[error] user argument error,not specified comment for option"
+        ;;
+    3)
+        echo "[error] user argument error,not specified instance_dir for -i, or dir <$instance_dir> not exist"
+        ;;
+    4)
+        echo "[error] user argument error,not specified mysql_dir for -m, or not exist mysql* file at <$mysql_dir/bin>"
+        ;;
+    5)
+        echo "[error] user argument error,not specified root password for -rp"
+        ;;
+    6)
+        echo "[error] user argument error,not specified db port for -p"
+        ;;
+    7)
+        echo "[error] user argument error,for zk options, need 3 extra argument"
+        ;;
+    8)
+        echo "[error] user argument error,not specified mysql user for -u"
+        ;;
+    9)
+        echo "[error] user argument error,not specified mysql user password for -up"
+        ;;
+    10)
+        echo "[error] user argument error,not specified mysql_user's database for -ud"
+        ;;
+    11)
+        echo "[error] user argument error,for slave options, need 3 extra argument with -s"
+        ;;
+    19)
+        echo "[error] user argument error, <$instance_dir> is exist when create instance dir"
+        ;;
+    21)
+        echo "[error] chown instance_dir to <$linux_user> failed"
+        ;;
+    22)
+        echo "[error] install db fail with command: $initialize_db and res: $install_db_res"
+        ;;
+    23)
+        echo "[error] start instance fail with command: $safemysqld, with alert.log at $tmp_alert_dir/$rename_alert_log"
+        ;;
+    24)
+        echo "[error] start instance fail when check start with command: $safemysqld, with alert.log at $tmp_alert_dir/$rename_alert_log"
+        ;;
+    25)
+        echo "[error] install zk plugin fail with command: $install_zk_plugin and reason: $install_zk_res $shutdown_err"
+        ;;
+    26)
+        echo "[error] modify root password fail with command: $install_zk_plugin and reason: $install_zk_res $shutdown_err"
+        ;;
+    31)
+        echo "[error] create user db fail with command: $mysql_create_database, and reason: $mysql_create_db_res"
+        ;;
+    32)
+        echo "[error] create user account fail with command: $mysql_create_user_account, and reason: $mysql_create_uc_res"
+        ;;
+    33)
+        echo "[error] grant user account fail with command: $mysql_grant_user_account, and reason: $grant_user_res"
+        ;;
+    34)
+        echo "[error] check grant user fail with command: $mysql_check_auth, and reason: $check_grant_res"
+        ;;
+    esac
+
+    if [ $return_value -ne 0 ]
+    then
+        show_help
+    fi
+    
+    exit $return_value
+}
+
+check_params ()                                                                                                                                                                  
+{
+    if [ $# -lt 14 ]
+    then
+        return_value=1
+        error_exit
+    fi
+
+    while true
+    do
+        case $1 in
+        -i)
+            if [ "${2:0:1}" != "-" ]
+            then
+                instance_dir=${2%\/}
+                shift 1
+            else
+                return_value=2
+                error_exit
+            fi
+            ;;
+        -m)
+            if [ "${2:0:1}" != "-" ]
+            then
+                mysql_dir=${2%\/}
+                shift 1
+            else
+                return_value=2
+                error_exit
+            fi
+            ;;
+        -p)
+            if [ "${2:0:1}" != "-" ]
+            then
+                db_port=$2
+                shift 1
+            else
+                return_value=2
+                error_exit
+            fi
+            ;;
+        -rp)
+            if [ "${2:0:1}" != "-" ]
+            then
+                root_pass=$2
+                shift 1
+            else
+                return_value=2
+                error_exit
+            fi
+            ;;
+        -u)
+            if [ "${2:0:1}" != "-" ]
+            then
+                mysql_user=$2
+                shift 1
+            else
+                return_value=2
+                error_exit
+            fi
+            ;;
+        -up)
+            if [ "${2:0:1}" != "-" ]
+            then
+                user_pass=$2
+                shift 1
+            else
+                return_value=2
+                error_exit
+            fi
+            ;;
+        -ud)
+            if [ "${2:0:1}" != "-" ]
+            then
+                user_db=$2
+                shift 1
+            else
+                return_value=2
+                error_exit
+            fi
+            ;;
+        -su)
+            if [ "${2:0:1}" != "-" ]
+            then
+                linux_user=$2
+                shift 1
+            else
+                return_value=2
+                error_exit
+            fi
+            ;;
+        -b)
+            if [ "${2:0:1}" != "-" ]
+            then
+                buffer_pool_size=$2
+                shift 1
+            else
+                return_value=2
+                error_exit
+            fi
+            ;;
+        -I)
+            if [ "${2:0:1}" != "-" ]
+            then
+                server_id=$2
+                shift 1
+            else
+                return_value=2
+                error_exit
+            fi
+            ;;
+        -h)
+            if [ ${2:0:1} != "-" ]
+            then
+                servers=$2
+                if [ $servers != "any" ]
+                then
+                    host_list=($(echo $servers | tr '#' ' ' | tr -s ' '))                                                                                                      
+                else
+                    servers=""
+                fi
+                shift
+            else
+                return_value=-2
+                error_exit
+            fi
+            ;;
+        -r)
+            readable_flag=1
+            ;;
+        "")
+            shift
+            break
+            ;;
+        ?)
+            shift
+            ;;
+        esac
+        shift
+    done
+
+    if [ -z "$instance_dir" ]
+    then
+        return_value=3
+        error_exit
+    fi
+
+    if [ ! -f "$mysql_dir/bin/mysql_install_db" -o ! -f "$mysql_dir/bin/mysqld_safe" -o ! -f "$mysql_dir/bin/mysqladmin" -o ! -f "$mysql_dir/bin/mysql" ]
+    then
+        return_value=4
+        error_exit
+    else
+        user_installdb="$mysql_dir/bin/mysql_install_db"
+        user_mysqladmin="$mysql_dir/bin/mysqladmin"
+        user_mysqld=$mysql_dir"/bin/mysqld_safe"
+        user_mysql=$mysql_dir"/bin/mysql"
+    fi
+
+    if [ -z "$root_pass" ]
+    then
+        return_value=5
+        error_exit
+    fi
+
+    if [ -z "$db_port" ]
+    then
+        return_value=6
+        error_exit
+    fi
+
+    if [ -z "$mysql_user" ]
+    then
+        return_value=8
+        error_exit
+    fi
+
+    if [ -z "$user_pass" ]
+    then
+        return_value=9
+        error_exit
+    fi
+
+    if [ -z "$user_db" ]
+    then
+        return_value=10
+        error_exit
+    fi
+
+    if [ -z "$linux_user" ]
+    then
+        linux_user=`whoami`
+    fi
+
+    #if [ $readable_flag -eq 1 ]
+    #then
+    #    readable_option="-r"
+    #fi
+
+    defaults="$instance_dir/conf/my.cnf"
+    mysql_command=$user_mysql" --defaults-file="$defaults" -uroot -p"$root_pass" -e "
+}
+
+dir_meta="dir_meta"     #instance install directory                                                                                                                              
+dir_base="dir_base"     #mysql binary directory
+port_base="port_base"       #instance port number
+sid_base="sid_base"     #server id
+rol_base="rol_base"     #read only flag for slave
+start_user="user=mysql"     #start mysql user for linux user
+rol_on="1"
+rol_off="0"
+buffer_size="innodb_buffer_pool_size="
+buffer_pool_size=200
+server_id="4"
+
+local_account_grant=0
+local_account_create=0
+database_create=0
+is_created_dir=0
+
+tmp_alert_dir="/tmp" 
+sample_db_conf="my.cnf.sample"
+script_dir=$(dirname $(readlink -f $0))"/" 
+
+check_params $@
+
+if [ $readable_flag = 1 ]                                                                                                                                                        
+then
+    echo "create instance parameters:"
+    echo "new instance at <$instance_dir>"
+    echo "mysql install dir <$mysql_dir>"
+    echo "db port <$db_port>"
+    echo "root password <$root_pass>"
+    echo "connect mysql user <$mysql_user>"
+    echo "mysql user password <$user_pass>"
+    echo "mysql user database <$user_db>"
+
+    echo "linux user <$linux_user>"
+    echo "buffer_pool_size <$buffer_pool_size>M"
+    echo "server-id <$server_id>"
+
+    if test ! -z $servers                                                                                                                                                        
+    then
+        echo "specified host list:"
+        for s in ${host_list[@]}
+        do
+            echo "host: <$s>"
+        done
+    else
+        echo "any host can access"
+    fi
+fi
+
+#clean old data
+#rm -rf $install_dir
+
+create_db_dir
+echo "create instance dir ok"
+
+gen_config
+echo "generate config ok"
+
+install_db
+echo "install db ok"
+
+start_server
+check_server
+echo "server mysqld server ok"
+
+modify_root_pwd
+echo "modify root password ok"
+
+create_user_db 
+echo "create user db ok"
+
+create_user_account
+echo "create user account ok"
+
+grant_user 
+check_grant
+echo "grant user ok" 
+
+echo "create mysql instance ok"
+
