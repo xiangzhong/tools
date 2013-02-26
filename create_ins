@@ -642,6 +642,8 @@ check_params ()
     if [ -z "$linux_user" ]
     then
         linux_user=`whoami`
+    else
+        user_name_option="--user=$linux_user"                                                                                                                                    
     fi
 
     #if [ $readable_flag -eq 1 ]
@@ -665,6 +667,7 @@ buffer_size="innodb_buffer_pool_size="
 buffer_pool_size=200
 server_id="4"
 
+user_name_option=
 local_account_grant=0
 local_account_create=0
 database_create=0
