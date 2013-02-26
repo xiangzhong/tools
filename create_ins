@@ -94,7 +94,7 @@ create_db_dir ()
 
 gen_config ()
 {
-    sample_db_conf=$script_dir$sample_db_conf                                                                                                                                    
+    sample_db_conf=$script_dir$sample_db_conf    
 
     #check my.cnf source
     if test ! -f "$sample_db_conf"
@@ -338,35 +338,35 @@ check_grant ()
 ## 41-50: create replicate and get binlog info error
 error_exit ()
 {
-    if [ $return_value -ne 0 ]
-    then
-        if [ $local_account_grant -eq 1 ]
-        then
-            revoke_user_account="\"revoke all on "$user_db".* from "$user_list";\""
-            mysql_revoke_user_account=$mysql_command$revoke_user_account
-            eval $mysql_revoke_user_account >/dev/null 2>&1
-        fi
+    #if [ $return_value -ne 0 ]
+    #then
+    #    if [ $local_account_grant -eq 1 ]
+    #    then
+    #        revoke_user_account="\"revoke all on "$user_db".* from "$user_list";\""
+    #        mysql_revoke_user_account=$mysql_command$revoke_user_account
+    #        eval $mysql_revoke_user_account >/dev/null 2>&1
+    #    fi
 
-        if [ $local_account_create -eq 1 ]
-        then
-            drop_user_account="\"drop user "$user_list";\""
-            mysql_drop_user_account=$mysql_command$drop_user_account
-            eval $mysql_drop_user_account >/dev/null 2>&1 
-        fi
+    #    if [ $local_account_create -eq 1 ]
+    #    then
+    #        drop_user_account="\"drop user "$user_list";\""
+    #        mysql_drop_user_account=$mysql_command$drop_user_account
+    #        eval $mysql_drop_user_account >/dev/null 2>&1 
+    #    fi
 
-        if [ $database_create -eq 1 ]
-        then
-            drop_database="\"drop database "$user_db";\""
-            mysql_drop_database=$mysql_command$drop_database
-            eval $mysql_drop_database >/dev/null 2>&1
-        fi
+    #    if [ $database_create -eq 1 ]
+    #    then
+    #        drop_database="\"drop database "$user_db";\""
+    #        mysql_drop_database=$mysql_command$drop_database
+    #        eval $mysql_drop_database >/dev/null 2>&1
+    #    fi
 
-        if [ $is_created_dir -eq 1 ]
-        then
-            rm -rf $instance_dir
-        fi
+    #    if [ $is_created_dir -eq 1 ]
+    #    then
+    #        rm -rf $instance_dir
+    #    fi
 
-    fi
+    #fi
 
     case $return_value in
     -1)
@@ -622,6 +622,9 @@ check_params ()
         user_mysqladmin="$mysql_dir/bin/mysqladmin"
         user_mysqld=$mysql_dir"/bin/mysqld_safe"
         user_mysql=$mysql_dir"/bin/mysql"
+
+        mysql_version_raw=$($mysql_dir/bin/mysql --version | awk '{print $5}')
+        mysql_version=${mysql_version_raw%,}
     fi
 
     if [ -z "$root_pass" ]
@@ -661,6 +664,11 @@ check_params ()
         user_name_option="--user=$linux_user"                                                                                                                                    
     fi
 
+    if [[ $mysql_version > 5.5.0 ]]
+    then
+        sample_db_conf="5-5.cnf.sample"
+    fi
+
     #if [ $readable_flag -eq 1 ]
     #then
     #    readable_option="-r"
@@ -689,7 +697,7 @@ database_create=0
 is_created_dir=0
 
 tmp_alert_dir="/tmp" 
-sample_db_conf="my.cnf.sample"
+sample_db_conf="5-1.cnf.sample"
 script_dir=$(dirname $(readlink -f $0))"/" 
 
 check_params $@
@@ -704,6 +712,7 @@ then
     echo "connect mysql user <$mysql_user>"
     echo "mysql user password <$user_pass>"
     echo "mysql user database <$user_db>"
+    echo "sample db config <$sample_db_conf>"
 
     echo "linux user <$linux_user>"
     echo "buffer_pool_size <$buffer_pool_size>M"
