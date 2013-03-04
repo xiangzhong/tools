@@ -690,6 +690,7 @@ buffer_size="innodb_buffer_pool_size="
 buffer_pool_size=200
 server_id="4"
 
+readable_flag=0
 user_name_option=
 local_account_grant=0
 local_account_create=0
@@ -702,7 +703,7 @@ script_dir=$(dirname $(readlink -f $0))"/"
 
 check_params $@
 
-if [ $readable_flag = 1 ]                                                                                                                                                        
+if [ $readable_flag -eq 1 ]                                                                                                                                                        
 then
     echo "create instance parameters:"
     echo "new instance at <$instance_dir>"
