@@ -82,7 +82,6 @@ read_buffer_size = 1M
 myisam_sort_buffer_size = 100M
 
 #innodb plugin
-ignore_builtin_innodb
 innodb_file_format=Barracuda
 innodb_strict_mode=1
 
@@ -93,11 +92,10 @@ innodb_flush_method = O_DIRECT
 innodb_file_per_table = 1
 innodb_flush_log_at_trx_commit = 0
 innodb_lock_wait_timeout = 100
-innodb_additional_mem_pool_size = 20M
 innodb_buffer_pool_size = 200M
 innodb_log_buffer_size= 120M
 innodb_log_file_size = 10M
-#innodb_log_group_home_dir = dir_meta/log/mysql_log/
+innodb_log_group_home_dir = dir_meta/data/
 innodb_log_files_in_group = 4
 #innodb_file_io_threads = 4
 innodb_read_io_threads=1
