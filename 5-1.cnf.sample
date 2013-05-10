@@ -1,0 +1,113 @@
+[client]
+socket = dir_meta/run/mysql.sock
+default-character-set = gbk
+
+[innotop]
+socket = dir_meta/run/mysql.sock
+
+[mysql]
+prompt = \\u@\\d \\r:\\m:\\s>
+no-auto-rehash
+
+[mysqld]
+#### Baes dir ####
+user=mysql
+basedir = dir_base
+datadir = dir_meta/data
+tmp_table_size =1024
+socket = dir_meta/run/mysql.sock
+###insert max_heap_table_size by xiangzhong
+max_heap_table_size=1000M
+
+#### Base configure info ####
+#default-character-set = gbk
+port = port_base
+#skip-locking
+skip-name-resolve
+old_passwords = 0
+lower_case_table_names = 1
+open_files_limit = 65535
+read_rnd_buffer_size = 5M
+max_allowed_packet = 24M
+max_connect_errors = 50000
+max_connections = 1000
+thread_cache_size=128
+thread_stack=524288
+#table_cache=256
+table_open_cache=800
+open_files_limit = 65535
+#explicit_defaults_for_timestamp=ON
+
+#### Log info ####
+log-error = dir_meta/log/alert.log
+#slow-query-log = true
+log_slow_queries = dir_meta/log/slow.log
+log-slow-admin-statements
+log-queries-not-using-indexes
+long_query_time = 1
+log_output=FILE
+
+#### Binary log && Relay log ####
+log-bin = dir_meta/log/mysql-bin
+sql-mode=STRICT_TRANS_TABLES
+binlog_format=ROW
+log-slave-updates = 1
+relay-log = dir_meta/log/mysqld-relay-bin
+relay-log-index = dir_meta/log/mysqld-relay-bin.index
+master-info-file = dir_meta/log/master.info
+relay-log-info-file = dir_meta/log/relay-log.info
+#expire_logs_days=1
+max_binlog_size = 500M
+max_binlog_cache_size = 2G
+
+#### Read Only ####
+read-only=rol_base
+
+### Server id ####
+server-id=sid_base
+
+#### query cache ####
+#query_cache_size = 30M
+query_cache_size = 0
+query_cache_limit = 1K
+query_cache_min_res_unit = 1K
+query_cache_type=2
+
+#myisam
+concurrent_insert = 2
+key_buffer = 100M
+sort_buffer_size = 100K
+join_buffer_size = 100K
+read_buffer_size = 1M
+myisam_sort_buffer_size = 100M
+
+#innodb plugin
+ignore_builtin_innodb
+plugin_load=innodb=ha_innodb_plugin.so;innodb_trx=ha_innodb_plugin.so;innodb_locks=ha_innodb_plugin.so;innodb_lock_waits=ha_innodb_plugin.so;innodb_cmp=ha_innodb_plugin.so;innodb_cmp_reset=ha_innodb_plugin.so;innodb_cmpmem=ha_innodb_plugin.so;innodb_cmpmem_reset=ha_innodb_plugin.so
+innodb_file_format=Barracuda
+innodb_strict_mode=1
+
+#innodb
+default-storage-engine = INNODB
+innodb_flush_method = O_DIRECT
+innodb_file_per_table = 1
+innodb_flush_log_at_trx_commit = 0
+innodb_lock_wait_timeout = 100
+innodb_additional_mem_pool_size = 20M
+innodb_buffer_pool_size = 200M
+innodb_log_buffer_size= 120M
+innodb_log_file_size = 10M
+#innodb_log_group_home_dir = dir_meta/log/mysql_log/
+innodb_log_files_in_group = 4
+#innodb_file_io_threads = 4
+innodb_read_io_threads=16
+innodb_write_io_threads=8
+innodb_io_capacity=1000
+innodb_thread_concurrency = 64
+innodb_max_dirty_pages_pct = 90
+#transaction-isolation = READ-COMMITTED
+#innodb_data_file_path = ibdata1:10G;ibdata2:10G;ibdata3:10G;ibdata4:10G;ibdata5:10G;ibdata6:10G;ibdata7:10G;ibdata8:10G;ibdata9:10G;ibdata10:10G;ibdata11:10G;ibdata12:10G;ibdata13:10G;ibdata14:10G;ibdata15:10G;ibdata16:10G;ibdata17:10G;ibdata18:10G;ibdata19:10G;ibdata20:10G;ibdata21:10G;ibdata22:10G;ibdata23:10G;ibdata24:10G;ibdata25:10G;ibdata26:10G;ibdata27:10G;ibdata28:10G;ibdata29:10G;ibdata30:10G
+innodb_data_file_path = ibdata1:10M;ibdata2:10M:autoextend
+[mysqld_safe]
+pid-file = dir_meta/run/mysqld.pid
+

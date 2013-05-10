@@ -1,0 +1,93 @@
+#!/usr/bin/stap -v
+
+%{
+#include <linux/cgroup.h>
+#include <linux/ctype.h>
+#include <linux/list.h>
+struct cgroupfs_root {
+    struct super_block *sb;
+    unsigned long subsys_bits;
+    int hierarchy_id;
+    unsigned long actual_subsys_bits;
+    struct list_head subsys_list;
+    struct cgroup top_cgroup;
+    int number_of_cgroups;
+    struct list_head root_list;
+    unsigned long flags;
+    char release_agent_path[4096];
+    char name[64];
+};
+struct cgroup_sb_opts {
+    unsigned long subsys_bits;
+    unsigned long flags;
+    char *release_agent;
+    char *name;
+    bool none;
+    struct cgroupfs_root *new_root;
+};
+%}
+
+function root_name:long(arg:long) %{ /* pure */ /* unprivileged */
+    struct cgroup_sb_opts *opts = (struct cgroup_sb_opts *)(THIS->arg);
+    THIS->__retvalue = opts->subsys_bits;
+%}
+
+function get_populate_addr:long(arg:long) %{ /* pure */ /* unprivileged */
+    struct cgroup *cgrp = (struct cgroup *)(THIS->arg);
+    struct cgroup_subsys *ss;
+    list_for_each_entry(ss, &cgrp->root->subsys_list, sibling) {
+        if (ss->populate)
+            THIS->__retvalue = (long)ss->populate;
+        else
+            THIS->__retvalue = 0;
+    }
+%}
+
+
+function proc:string() {
+    return sprintf("%d (%s)", pid(), execname())
+}
+
+probe begin {
+    printf("starting...")
+}
+
+probe kernel.function("cpu_shares_read_u64") {
+    printf("%s cpu_shares_read_u64 call trace:\n", proc());
+    print_backtrace();
+}
+
+probe kernel.function("cpu_shares_write_u64") {
+    printf("%s cpu_shares_write_u64 call trace:\n", proc());
+    print_backtrace();
+}
+
+probe kernel.function("cpu_cgroup_can_attach") {
+    printf("%s cpu_cgroup_can_attach call trace:\n", proc());
+    print_backtrace();
+}
+
+probe kernel.function("cpuset_change_cpumask") {
+    printf("%s cpuset_change_cpumask call trace:\n", proc());
+    print_backtrace();
+}
+
+probe kernel.function("cgroup_root_from_opts") {
+    printf("%s cgroup_root_from_opts subsys bit= %u\n", proc(), root_name($opts));
+    print_backtrace();
+}
+
+probe kernel.function("cgroup_populate_dir") {
+    //printf("addr=%p, r12= %p, rax=%p, populate_addr=%p\n", addr(), register("r12"), register("rax"), kernel_long(register("rax")));
+    printf("populate_addr=%p\n", get_populate_addr($cgrp));
+    print_backtrace();
+}
+
+probe kernel.function(0xffffffff810c0078) {
+ printf("probe addr=%p, r12= %p, rax=%p\n", addr(), register("r12"), register("rax"));
+ print_backtrace();
+}
+
+probe kernel.function("cgroup_test_super").return {
+    printf("cgroup_test_super ret:%u\n", $return);
+}
